@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import {
   Activity,
   AlertCircle,
@@ -102,6 +102,15 @@ export default function App() {
   const [expandedReqs, setExpandedReqs] = useState<Record<string, boolean>>({})
   const [inspectingSource, setInspectingSource] = useState<string | null>(null)
 
+  // Track active project & request ID to prevent async race conditions
+  const activeIdRef = useRef<string>(activeId)
+  useEffect(() => {
+    activeIdRef.current = activeId
+  }, [activeId])
+
+  const activeRequestRef = useRef<number>(0)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
   // Load project list & health
   useEffect(() => {
     Promise.all([
@@ -123,22 +132,25 @@ export default function App() {
 
   const selectedProject = projects.find(p => p.id === activeId)
 
+  // Invariant safety: guarantee displayed audit strictly belongs to currently selected project
+  const isAuditMatchingCurrent = audit !== null && audit.project_id === activeId
+
   // Filter requirements
   const filteredRequirements = useMemo(() => {
-    if (!audit) return []
+    if (!isAuditMatchingCurrent || !audit) return []
     return audit.requirements.filter(r => {
       if (filter === 'open') return r.status !== 'VERIFIED'
       if (filter === 'passed') return r.status === 'VERIFIED'
       return true
     })
-  }, [audit, filter])
+  }, [audit, isAuditMatchingCurrent, filter])
 
-  const verifiedCount = audit?.counts.VERIFIED ?? 0
-  const progressPct = audit && audit.total > 0 ? Math.round((verifiedCount / audit.total) * 100) : 0
+  const verifiedCount = isAuditMatchingCurrent && audit ? audit.counts.VERIFIED : 0
+  const progressPct = isAuditMatchingCurrent && audit && audit.total > 0 ? Math.round((verifiedCount / audit.total) * 100) : 0
 
   // Lookup detail for active inspected evidence source
   const inspectedRecord = useMemo(() => {
-    if (!inspectingSource || !audit) return null
+    if (!inspectingSource || !isAuditMatchingCurrent || !audit) return null
     for (const req of audit.requirements) {
       const match = req.evidence.find(e => e.source === inspectingSource)
       if (match) {
@@ -146,7 +158,7 @@ export default function App() {
       }
     }
     return null
-  }, [inspectingSource, audit])
+  }, [inspectingSource, audit, isAuditMatchingCurrent])
 
   function handleInspectSource(sid: string) {
     if (inspectingSource === sid) {
@@ -154,29 +166,54 @@ export default function App() {
     } else {
       setInspectingSource(sid)
       // Automatically expand matching requirement card in Column A
-      const matchReq = audit?.requirements.find(r => r.evidence.some(e => e.source === sid))
-      if (matchReq) {
-        setExpandedReqs(prev => ({ ...prev, [matchReq.id]: true }))
+      if (isAuditMatchingCurrent && audit) {
+        const matchReq = audit.requirements.find(r => r.evidence.some(e => e.source === sid))
+        if (matchReq) {
+          setExpandedReqs(prev => ({ ...prev, [matchReq.id]: true }))
+        }
       }
     }
   }
 
-  // Run Audit
+  // Run Audit with request cancellation and race condition safety
   const runAudit = useCallback(async (targetMode: Mode = mode, targetProjectId: string = activeId) => {
+    if (busy) return
+
+    // Immediately cancel any previous in-flight audit request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    const currentRequestId = ++activeRequestRef.current
     setBusy(true)
     setError('')
     setCopied(false)
     setInspectingSource(null)
+
     try {
       const response = await fetch('/api/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: targetProjectId, mode: targetMode })
+        body: JSON.stringify({ project_id: targetProjectId, mode: targetMode }),
+        signal: controller.signal
       })
       const body = await response.json()
       if (!response.ok) {
         throw new Error(typeof body.detail === 'string' ? body.detail : 'Audit failed')
       }
+
+      // Race condition check: Ensure this response belongs to the currently active project and request
+      if (
+        currentRequestId !== activeRequestRef.current ||
+        targetProjectId !== activeIdRef.current ||
+        body.project_id !== activeIdRef.current
+      ) {
+        // Discard stale response
+        return
+      }
+
       setAudit(body as Audit)
       setFilter('all')
       if (targetMode !== mode) {
@@ -188,12 +225,21 @@ export default function App() {
         if (r.status !== 'VERIFIED') initialExpanded[r.id] = true
       })
       setExpandedReqs(initialExpanded)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unexpected audit error')
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Audit cancelled due to project switch or rerun; ignore silently
+        return
+      }
+      if (currentRequestId === activeRequestRef.current && targetProjectId === activeIdRef.current) {
+        setError(err instanceof Error ? err.message : 'Unexpected audit error')
+      }
     } finally {
-      setBusy(false)
+      if (currentRequestId === activeRequestRef.current) {
+        setBusy(false)
+        abortControllerRef.current = null
+      }
     }
-  }, [mode, activeId])
+  }, [busy, mode, activeId])
 
   // Keyboard shortcut: Cmd+Enter / Ctrl+Enter to trigger audit
   useEffect(() => {
@@ -211,8 +257,17 @@ export default function App() {
 
   function handleSelectProject(id: string) {
     if (id === activeId) return
+
+    // Immediately abort any in-flight audit request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    activeRequestRef.current += 1
+
     setActiveId(id)
     setAudit(null)
+    setBusy(false)
     setError('')
     setCopied(false)
     setInspectingSource(null)
@@ -223,7 +278,7 @@ export default function App() {
   }
 
   async function handleCopyReport() {
-    if (!audit) return
+    if (!audit || !isAuditMatchingCurrent) return
     const content = [
       `=======================================================`,
       `HANDOFFPROOF EVIDENCE AUDIT REPORT — ${audit.project_name.toUpperCase()}`,
@@ -413,9 +468,10 @@ export default function App() {
                     type="button"
                     role="radio"
                     aria-checked={mode === 'agent'}
+                    disabled={busy}
                     className={`segmented-option ${mode === 'agent' ? 'active agent' : ''}`}
-                    onClick={() => setMode('agent')}
-                    title="Real Google ADK Agent with 4 tool executions and Gemini model"
+                    onClick={() => !busy && setMode('agent')}
+                    title={busy ? "Mode cannot be changed during an active audit" : "Real Google ADK Agent with 4 tool executions and Gemini model"}
                   >
                     <Sparkles size={13} />
                     <span>Google ADK Agent</span>
@@ -424,9 +480,10 @@ export default function App() {
                     type="button"
                     role="radio"
                     aria-checked={mode === 'preview'}
+                    disabled={busy}
                     className={`segmented-option ${mode === 'preview' ? 'active' : ''}`}
-                    onClick={() => setMode('preview')}
-                    title="100% offline deterministic policy calculation"
+                    onClick={() => !busy && setMode('preview')}
+                    title={busy ? "Mode cannot be changed during an active audit" : "100% offline deterministic policy calculation"}
                   >
                     <Terminal size={13} />
                     <span>Evidence Preview</span>
@@ -460,8 +517,8 @@ export default function App() {
             </section>
           )}
 
-          {/* Executive Verdict Banner (Shows when audit has executed) */}
-          {audit ? (
+          {/* Executive Verdict Banner (Shows only when audit matches current project) */}
+          {isAuditMatchingCurrent && audit ? (
             <section className={`executive-verdict-card ${audit.status.toLowerCase()}`} aria-label="Audit Results">
               <div className="verdict-header-row">
                 <div className="verdict-main-meta">
@@ -581,7 +638,7 @@ export default function App() {
                     className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
                     onClick={() => setFilter('all')}
                   >
-                    All ({audit?.requirements.length || 0})
+                    All ({isAuditMatchingCurrent && audit ? audit.requirements.length : 0})
                   </button>
                   <button
                     type="button"
@@ -590,7 +647,7 @@ export default function App() {
                     className={`filter-tab ${filter === 'open' ? 'active' : ''}`}
                     onClick={() => setFilter('open')}
                   >
-                    Blockers ({audit?.blockers.length || 0})
+                    Blockers ({isAuditMatchingCurrent && audit ? audit.blockers.length : 0})
                   </button>
                   <button
                     type="button"
@@ -605,7 +662,7 @@ export default function App() {
               </div>
 
               <div className="requirements-container">
-                {audit ? (
+                {isAuditMatchingCurrent && audit ? (
                   filteredRequirements.length > 0 ? (
                     filteredRequirements.map(req => {
                       const isExpanded = expandedReqs[req.id] ?? false
@@ -698,7 +755,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {!busy && audit?.mode === 'agent' && (
+                {!busy && isAuditMatchingCurrent && audit?.mode === 'agent' && (
                   <span className="tool-count-badge">
                     {audit.agent_review?.complete ? '4 / 4 Tools Executed' : `${audit.agent_review?.tool_call_count || 0}/4 Tools`}
                   </span>
@@ -739,7 +796,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                ) : !audit ? (
+                ) : !isAuditMatchingCurrent || !audit ? (
                   <div style={{ textAlign: 'center', padding: '36px', color: '#64748b', fontSize: '12px' }}>
                     Tool execution timeline will stream here after audit execution.
                   </div>

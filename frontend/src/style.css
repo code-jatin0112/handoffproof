@@ -483,8 +483,13 @@ button, input, select {
   white-space: nowrap;
 }
 
-.segmented-option:hover {
+.segmented-option:hover:not(:disabled) {
   color: var(--text-secondary);
+}
+
+.segmented-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .segmented-option.active {
