@@ -1,0 +1,58 @@
+[
+  {
+    "id":"storefront", "name":"NovaCommerce Storefront", "client":"Nova Retail", "owner":"Delivery Team", "target_date":"2026-10-31", "description":"E-commerce launch with checkout, authentication, responsive pages and client signoff.",
+    "requirements":[
+      {"id":"auth", "title":"Account sign-in implemented", "kind":"deliverable", "key":"auth-module", "critical":true},
+      {"id":"checkout", "title":"Payment checkout passes acceptance tests", "kind":"test", "key":"checkout-e2e", "critical":true},
+      {"id":"responsive", "title":"Responsive storefront delivered", "kind":"deliverable", "key":"responsive-ui", "critical":false},
+      {"id":"approval", "title":"Client launch approval received", "kind":"approval", "key":"launch-signoff", "critical":true}
+    ],
+    "deliverables":[
+      {"key":"auth-module", "status":"complete", "source":"DEL-101", "detail":"Login and signup merged in release build."},
+      {"key":"responsive-ui", "status":"complete", "source":"DEL-108", "detail":"Mobile and tablet layouts delivered."}
+    ],
+    "tests":[{"key":"checkout-e2e", "status":"failed", "source":"QA-224", "detail":"Card payment callback fails on error state."}],
+    "approvals":[{"key":"launch-signoff", "status":"pending", "source":"APR-042", "detail":"Client requested payment verification before approval."}]
+  },
+  {
+    "id":"ready", "name":"Atlas Agency Website", "client":"Atlas Studio", "owner":"Website Team", "target_date":"2026-11-02", "description":"Marketing website signed off and ready to hand over.",
+    "requirements":[
+      {"id":"landing", "title":"Landing pages delivered", "kind":"deliverable", "key":"landing-pages", "critical":true},
+      {"id":"accessibility", "title":"Accessibility audit passed", "kind":"test", "key":"a11y-check", "critical":true},
+      {"id":"approval", "title":"Client signed off", "kind":"approval", "key":"final-approval", "critical":true}
+    ],
+    "deliverables":[{"key":"landing-pages", "status":"complete", "source":"DEL-201", "detail":"All six approved pages published to staging."}],
+    "tests":[{"key":"a11y-check", "status":"passed", "source":"QA-277", "detail":"Accessibility checks passed against agreed criteria."}],
+    "approvals":[{"key":"final-approval", "status":"approved", "source":"APR-100", "detail":"Authorized client contact signed off."}]
+  },
+  {
+    "id":"missing", "name":"Orbit Mobile Portal", "client":"Orbit Services", "owner":"Mobile Team", "target_date":"2026-11-04", "description":"A new portal whose integration evidence has not yet been submitted.",
+    "requirements":[
+      {"id":"portal", "title":"Portal interface delivered", "kind":"deliverable", "key":"portal-ui", "critical":true},
+      {"id":"security", "title":"Security checks completed", "kind":"test", "key":"security-suite", "critical":true},
+      {"id":"signoff", "title":"Acceptance recorded", "kind":"approval", "key":"client-ok", "critical":true}
+    ],
+    "deliverables":[{"key":"portal-ui", "status":"complete", "source":"DEL-302", "detail":"Core portal screens shipped."}],
+    "tests":[], "approvals":[]
+  },
+  {
+    "id":"conflicting", "name":"Beacon CRM Migration", "client":"Beacon Partners", "owner":"Data Team", "target_date":"2026-11-06", "description":"Contradictory acceptance records need resolution.",
+    "requirements":[
+      {"id":"migration", "title":"Data migration verified", "kind":"test", "key":"migration-reconcile", "critical":true},
+      {"id":"signoff", "title":"Migration approval recorded", "kind":"approval", "key":"migration-signoff", "critical":true}
+    ],
+    "deliverables":[],
+    "tests":[{"key":"migration-reconcile", "status":"passed", "source":"QA-410", "detail":"Reconciliation report v1 shows success."},{"key":"migration-reconcile", "status":"failed", "source":"QA-411", "detail":"Re-run found unmatched records."}],
+    "approvals":[{"key":"migration-signoff", "status":"approved", "source":"APR-401", "detail":"Conditional signoff pending re-run."}]
+  },
+  {
+    "id":"outage", "name":"Mercury API Handoff", "client":"Mercury Data", "owner":"Platform Team", "target_date":"2026-11-07", "description":"Simulates an unavailable external testing evidence source.",
+    "requirements":[
+      {"id":"api", "title":"API package delivered", "kind":"deliverable", "key":"api-package", "critical":true},
+      {"id":"regression", "title":"Regression suite verified", "kind":"test", "key":"regression", "critical":true}
+    ],
+    "deliverables":[{"key":"api-package", "status":"complete", "source":"DEL-502", "detail":"Versioned API package delivered."}],
+    "tests":[{"key":"regression", "status":"passed", "source":"QA-502", "detail":"Cached test record; fresh verification unavailable."}],
+    "approvals":[], "unavailable_sources":["test"]
+  }
+]
