@@ -64,7 +64,12 @@ app.add_middleware(
 )
 
 # Mount built React assets if available so FastAPI can serve both dashboards as a single service
-FRONTEND_DIST = Path(__file__).resolve().parent.parent / 'frontend' / 'dist'
+candidate_dists = [
+    Path(__file__).resolve().parent.parent / 'frontend' / 'dist',
+    Path(__file__).resolve().parent / 'dist',
+    Path(__file__).resolve().parent.parent / 'dist'
+]
+FRONTEND_DIST = next((d for d in candidate_dists if (d / 'assets').exists()), candidate_dists[0])
 if (FRONTEND_DIST / 'assets').exists():
     from fastapi.staticfiles import StaticFiles
     app.mount('/assets', StaticFiles(directory=str(FRONTEND_DIST / 'assets')), name='assets')
