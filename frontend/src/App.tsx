@@ -1,19 +1,40 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
-  Activity, ArrowDownRight, ArrowRight, Check, CheckCircle2,
-  ChevronDown, CircleAlert, CircleDashed, ClipboardCheck, Clock3, Code2,
-  Copy, Cpu, FileCheck, FileWarning, FolderClosed, GitBranch, Info, LockKeyhole,
-  Radar, RefreshCw, ScanSearch, Shield, ShieldAlert, ShieldCheck,
-  Sparkles, Terminal, TriangleAlert, XCircle
+  Activity,
+  AlertCircle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Code2,
+  Copy,
+  Cpu,
+  FileCheck,
+  FileText,
+  FolderGit2,
+  GitBranch,
+  Layers,
+  Lock,
+  RefreshCw,
+  RotateCcw,
+  ScanSearch,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Terminal,
+  X,
+  XCircle
 } from 'lucide-react'
 
-type Status = 'READY'|'BLOCKED'|'NEEDS_REVIEW'
-type ItemStatus = 'VERIFIED'|'BLOCKED'|'UNVERIFIED'|'CONFLICT'
-type Mode = 'preview'|'agent'
-type Project = { id:string; name:string; client:string; owner:string; target_date:string; description:string }
-type Evidence = { source:string; status:string; detail:string }
-type Requirement = { id:string; title:string; kind:string; critical:boolean; status:ItemStatus; reason:string; evidence:Evidence[] }
+type Status = 'READY' | 'BLOCKED' | 'NEEDS_REVIEW'
+type ItemStatus = 'VERIFIED' | 'BLOCKED' | 'UNVERIFIED' | 'CONFLICT'
+type Mode = 'agent' | 'preview'
+type Project = { id: string; name: string; client: string; owner: string; target_date: string; description: string }
+type Evidence = { source: string; status: string; detail: string }
+type Requirement = { id: string; title: string; kind: string; critical: boolean; status: ItemStatus; reason: string; evidence: Evidence[] }
 type ToolEvent = {
   tool: string
   title: string
@@ -48,92 +69,77 @@ type Audit = {
   agent_review: Review | null
   policy: string
 }
-type Health = { ok: boolean; agent_configured: boolean; project_count: number }
+type Health = { ok: boolean; agent_configured: boolean; model?: string; project_count: number }
 
-const projectDemoLabels: Record<string, string> = {
-  storefront: 'NovaCommerce Storefront [Demo: Blocked by QA Failure]',
-  ready: 'Atlas Agency Website [Demo: All Verified Ready]',
-  missing: 'Orbit Mobile Portal [Demo: Missing Evidence]',
-  conflicting: 'Beacon CRM Migration [Demo: Conflicting Records]',
-  outage: 'Mercury API Handoff [Demo: External Source Outage]'
+const projectScenarios: Record<string, { tag: string; type: 'danger' | 'success' | 'warning' }> = {
+  storefront: { tag: 'QA Blocker', type: 'danger' },
+  ready: { tag: 'Verified Ready', type: 'success' },
+  missing: { tag: 'Missing Data', type: 'warning' },
+  conflicting: { tag: 'Conflict', type: 'warning' },
+  outage: { tag: 'Source Outage', type: 'danger' }
 }
 
-const projectDemoBadges: Record<string, { badge: string; type: 'success' | 'danger' | 'warning' | 'muted' }> = {
-  storefront: { badge: 'Blocked by Failed QA (QA-224)', type: 'danger' },
-  ready: { badge: 'Fully Verified & Ready for Signoff', type: 'success' },
-  missing: { badge: 'Missing Test & Signoff Records', type: 'warning' },
-  conflicting: { badge: 'Conflicting Test Evidence', type: 'warning' },
-  outage: { badge: 'External QA Source Outage', type: 'danger' }
+const statusConfig: Record<Status, { label: string; text: string; icon: typeof ShieldCheck }> = {
+  READY: { label: 'Handoff Ready', text: 'All criteria verified with supporting evidence.', icon: ShieldCheck },
+  BLOCKED: { label: 'Handoff Blocked', text: 'Explicit test failure or incomplete deliverable detected.', icon: ShieldAlert },
+  NEEDS_REVIEW: { label: 'Needs Human Review', text: 'Evidence missing, conflicting, or source unavailable.', icon: AlertCircle }
 }
 
-const toolNames: Record<string, string> = {
-  read_project_brief: 'Read project brief',
-  inspect_deliverables: 'Inspect deliverables',
-  inspect_test_results: 'Inspect test evidence',
-  inspect_client_approvals: 'Inspect client approvals'
+const itemStatusConfig: Record<ItemStatus, { label: string; class: string; icon: typeof Check }> = {
+  VERIFIED: { label: 'Verified', class: 'verified', icon: Check },
+  BLOCKED: { label: 'Blocked', class: 'blocked', icon: XCircle },
+  UNVERIFIED: { label: 'Unverified', class: 'unverified', icon: Clock },
+  CONFLICT: { label: 'Conflict', class: 'conflict', icon: GitBranch }
 }
 
-const badgeLabel: Record<ItemStatus, string> = {
-  VERIFIED: 'Verified',
-  BLOCKED: 'Blocked',
-  UNVERIFIED: 'Unverified',
-  CONFLICT: 'Conflict'
-}
-
-const stateLabel: Record<Status, string> = {
-  READY: 'Handoff ready',
-  BLOCKED: 'Handoff blocked',
-  NEEDS_REVIEW: 'Needs human review'
-}
-
-function Flag({ children, type = 'muted' }: { children: ReactNode; type?: string }) {
-  return <span className={'flag ' + type}>{children}</span>
-}
-
-function App() {
+export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
-  const [active, setActive] = useState('storefront')
-  const [mode, setMode] = useState<Mode>('preview')
+  const [activeId, setActiveId] = useState<string>('storefront')
+  const [mode, setMode] = useState<Mode>('agent')
   const [audit, setAudit] = useState<Audit | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
   const [filter, setFilter] = useState<'all' | 'open' | 'passed'>('all')
+  const [expandedReqs, setExpandedReqs] = useState<Record<string, boolean>>({})
 
+  // Load project list & health
   useEffect(() => {
     Promise.all([
       fetch('/api/projects').then(r => {
-        if (!r.ok) throw new Error('Unable to load projects')
+        if (!r.ok) throw new Error('Unable to fetch project list')
         return r.json()
       }),
       fetch('/api/health').then(r => {
-        if (!r.ok) throw new Error('Unable to connect to backend')
+        if (!r.ok) throw new Error('Backend health probe failed')
         return r.json()
       })
     ]).then(([ps, hs]) => {
       setProjects(ps)
       setHealth(hs)
     }).catch(() => {
-      setError('Cannot connect to the backend. Start FastAPI at localhost:8000, then refresh this page.')
+      setError('Cannot connect to backend server at localhost:8000. Ensure FastAPI is running.')
     })
   }, [])
 
-  const selected = projects.find(p => p.id === active)
-  const demoBadge = active ? projectDemoBadges[active] : null
+  const selectedProject = projects.find(p => p.id === activeId)
 
-  const visible = useMemo(() => {
-    return audit?.requirements.filter(r => (
-      filter === 'all' ||
-      (filter === 'open' && r.status !== 'VERIFIED') ||
-      (filter === 'passed' && r.status === 'VERIFIED')
-    )) || []
+  // Filter requirements
+  const filteredRequirements = useMemo(() => {
+    if (!audit) return []
+    return audit.requirements.filter(r => {
+      if (filter === 'open') return r.status !== 'VERIFIED'
+      if (filter === 'passed') return r.status === 'VERIFIED'
+      return true
+    })
   }, [audit, filter])
 
-  const verified = audit?.counts.VERIFIED ?? 0
-  const fraction = audit && audit.total > 0 ? Math.round(100 * verified / audit.total) : 0
+  const verifiedCount = audit?.counts.VERIFIED ?? 0
+  const progressPct = audit && audit.total > 0 ? Math.round((verifiedCount / audit.total) * 100) : 0
 
-  async function runAudit(nextMode: Mode = mode, projectId: string = active) {
+  // Run Audit
+  const runAudit = useCallback(async (targetMode: Mode = mode, targetProjectId: string = activeId) => {
     setBusy(true)
     setError('')
     setCopied(false)
@@ -141,7 +147,7 @@ function App() {
       const response = await fetch('/api/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, mode: nextMode })
+        body: JSON.stringify({ project_id: targetProjectId, mode: targetMode })
       })
       const body = await response.json()
       if (!response.ok) {
@@ -149,557 +155,632 @@ function App() {
       }
       setAudit(body as Audit)
       setFilter('all')
-      if (nextMode !== mode) {
-        setMode(nextMode)
+      if (targetMode !== mode) {
+        setMode(targetMode)
       }
+      // Expand blocked requirements automatically for inspection
+      const initialExpanded: Record<string, boolean> = {}
+      body.requirements?.forEach((r: Requirement) => {
+        if (r.status !== 'VERIFIED') initialExpanded[r.id] = true
+      })
+      setExpandedReqs(initialExpanded)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unexpected audit failure')
+      setError(err instanceof Error ? err.message : 'Unexpected audit error')
     } finally {
       setBusy(false)
     }
-  }
+  }, [mode, activeId])
 
-  function changeProject(id: string) {
-    setActive(id)
+  // Keyboard shortcut: Cmd+Enter / Ctrl+Enter to trigger audit
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault()
+        if (!busy && selectedProject) {
+          runAudit()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [runAudit, busy, selectedProject])
+
+  function handleSelectProject(id: string) {
+    if (id === activeId) return
+    setActiveId(id)
     setAudit(null)
     setError('')
     setCopied(false)
   }
 
-  async function copySummary() {
+  function toggleRequirementExpand(id: string) {
+    setExpandedReqs(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  async function handleCopyReport() {
     if (!audit) return
-    const body = [
-      `HANDOFFPROOF — ${audit.project_name}`,
-      `Mode: ${audit.mode === 'agent' ? 'Google ADK Agent' : 'Offline Evidence Preview'}`,
-      `Decision: ${stateLabel[audit.status]}`,
-      audit.summary,
-      '',
-      ...audit.requirements.map(r => `${r.status}: ${r.title} — ${r.reason}\nEvidence: ${r.evidence.map(e => `${e.source} (${e.status})`).join(', ') || 'none'}`),
-      '',
-      'NEXT ACTIONS',
-      ...audit.next_actions.map((x, i) => `${i + 1}. ${x}`),
-      '',
-      'HUMAN GATE: Release requires formal human stakeholder authorization.',
-      'Policy: ' + audit.policy
+    const content = [
+      `=======================================================`,
+      `HANDOFFPROOF AUDIT CERTIFICATION — ${audit.project_name.toUpperCase()}`,
+      `=======================================================`,
+      `Client: ${audit.client}`,
+      `Mode: ${audit.mode === 'agent' ? 'Google ADK Agent Audit' : 'Offline Deterministic Preview'}`,
+      `Status: ${statusConfig[audit.status].label.toUpperCase()}`,
+      `Policy Summary: ${audit.summary}`,
+      `Requirements Verified: ${audit.counts.VERIFIED}/${audit.total}`,
+      ``,
+      `--- CONTRACTUAL REQUIREMENTS ---`,
+      ...audit.requirements.map(r => (
+        `[${r.status}] ${r.title} (${r.kind.toUpperCase()})\n  Reason: ${r.reason}\n  Evidence: ${r.evidence.map(e => `${e.source} [${e.status}] - ${e.detail}`).join('; ') || 'None'}`
+      )),
+      ``,
+      `--- REMEDIATION / NEXT ACTIONS ---`,
+      ...audit.next_actions.map((act, i) => `${i + 1}. ${act}`),
+      ``,
+      `--- GOVERNANCE NOTICE ---`,
+      `Human Approval Required: AI agents assist audit verification but cannot self-authorize client releases. Formal sign-off is mandatory.`,
+      `Policy: ${audit.policy}`,
+      `Generated by HandoffProof (Track 4 Google ADK)`
     ].join('\n')
 
     try {
-      await navigator.clipboard.writeText(body)
+      await navigator.clipboard.writeText(content)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 2200)
+      setTimeout(() => setCopied(false), 2400)
     } catch {
-      setError('Clipboard unavailable. Select text from the report manually.')
+      setError('Clipboard unavailable. Please copy text manually from report.')
     }
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-logo"><ShieldCheck size={22} strokeWidth={2.5} /></span>
+    <div className="app-container">
+      {/* 1. SIDEBAR NAVIGATION */}
+      <aside className="app-sidebar">
+        <div className="sidebar-header">
+          <div className="brand-wrapper">
+            <div className="brand-mark">
+              <ShieldCheck size={18} strokeWidth={2.5} />
+            </div>
+            <div>
+              <div className="brand-text">handoff<span>proof</span></div>
+            </div>
+          </div>
+          <span className="brand-pill">Track 4</span>
+        </div>
+
+        <div className="sidebar-content">
           <div>
-            <strong>handoff<span>proof</span></strong>
-            <small>DELIVERY INTELLIGENCE</small>
+            <div className="sidebar-section-title">Demo Scenarios</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {projects.map(p => {
+                const badge = projectScenarios[p.id]
+                const isActive = p.id === activeId
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleSelectProject(p.id)}
+                    className={`project-nav-item ${isActive ? 'active' : ''}`}
+                  >
+                    <div className="project-nav-top">
+                      <span className="project-nav-name">{p.name}</span>
+                      {badge && (
+                        <span className={`project-nav-badge ${badge.type}`}>
+                          {badge.tag}
+                        </span>
+                      )}
+                    </div>
+                    <span className="project-nav-client">{p.client}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 'auto' }}>
+            <div className="sidebar-section-title">System Architecture</div>
+            <div className="trust-badge-card">
+              <Layers size={16} className="trust-badge-icon" />
+              <div className="trust-badge-text">
+                <strong>Google ADK + Policy</strong>
+                4 read-only tools extract evidence; an immutable policy engine issues mathematical verdicts.
+              </div>
+            </div>
           </div>
         </div>
-        <div className="nav-section-label">WORKSPACE</div>
-        <div className="nav-link active">
-          <Radar size={18} />
-          <span>Audit overview</span>
-          <span className="nav-dot" />
-        </div>
-        <div className="nav-link disabled">
-          <FolderClosed size={18} />
-          <span>Projects</span>
-          <Flag>5 demos</Flag>
-        </div>
-        <div className="nav-link disabled">
-          <GitBranch size={18} />
-          <span>Evidence graph</span>
-        </div>
-        <div className="sidebar-divider" />
-        <div className="nav-section-label">DEMO ENVIRONMENT</div>
-        <div className="demo-note">
-          <span className="live-indicator" />
-          Sandbox workspace
-          <br />
-          <small>All data is simulated. Read-only tools. Human authorization required.</small>
-        </div>
-        <div className="sidebar-spacer" />
-        <div className="sidebar-help">
-          <LockKeyhole size={16} />
-          <div>
-            <strong>Evidence-first by design</strong>
-            <p>The policy engine is immutable. The LLM cannot grant self-approval.</p>
-          </div>
-        </div>
-        <div className="sidebar-bottom">
-          <span className="avatar">HP</span>
-          <div>
-            <strong>Hackathon Workspace</strong>
-            <small>Track 4 · Google ADK</small>
+
+        <div className="sidebar-footer">
+          <div className="trust-badge-card" style={{ background: 'transparent', border: 'none', padding: '0' }}>
+            <Lock size={14} style={{ color: '#94a3b8', flexShrink: 0, marginTop: '2px' }} />
+            <div className="trust-badge-text" style={{ fontSize: '10px', color: '#64748b' }}>
+              All demonstration datasets are simulated contracts. AI tools run read-only.
+            </div>
           </div>
         </div>
       </aside>
 
-      <main className="main">
-        <header className="topbar">
-          <div className="crumb">
-            Workspace <span>/</span> Project audits <span>/</span> <strong>Overview</strong>
-          </div>
-          <div className="top-right">
-            <Flag type="success"><span className="small-dot" /> Local demo</Flag>
-            <span className="top-divider" />
-            <span className="hack-label"><Code2 size={15} /> Built for evidence</span>
+      {/* 2. MAIN APPLICATION WORKSPACE */}
+      <div className="app-main">
+        {/* Top Navbar */}
+        <header className="top-navbar">
+          <nav className="breadcrumb-nav">
+            <span>Workspaces</span>
+            <span>/</span>
+            <span>Client Audits</span>
+            <span>/</span>
+            <span className="breadcrumb-active">{selectedProject?.name || 'Project'}</span>
+          </nav>
+          <div className="top-actions">
+            <div className="system-status-indicator">
+              <span className="status-dot-active" />
+              <span>{health?.model ? `${health.model} Active` : 'FastAPI Connected'}</span>
+            </div>
+            <a
+              href="https://github.com/code-jatin0112/handoffproof"
+              target="_blank"
+              rel="noreferrer"
+              className="btn-secondary"
+              style={{ textDecoration: 'none' }}
+            >
+              <FolderGit2 size={14} />
+              <span>GitHub</span>
+            </a>
           </div>
         </header>
 
-        <div className="content">
-          <section className="hero">
-            <div className="eyebrow">
-              <span className="spark"><Sparkles size={13} /></span>
-              EVIDENCE-BASED HANDOFF INTELLIGENCE
-              <span className="eyebrow-line" />
-            </div>
-            <div className="hero-line">
-              <div>
-                <h1>Make every handoff<br /><em>defensible.</em></h1>
-                <p>Stop guessing whether a project is ready. Inspect deliverables, test records, and client approvals—then produce a verdict backed by actual evidence.</p>
-              </div>
-              <div className="hero-illustration">
-                <div className="orbit orbit-one" />
-                <div className="orbit orbit-two" />
-                <div className="orbit orbit-three" />
-                <div className="orbit-mark"><ShieldCheck size={48} strokeWidth={1.3} /></div>
-                <span className="orbit-label label-top"><CheckCircle2 size={13} /> Verified</span>
-                <span className="orbit-label label-bottom"><Activity size={13} /> Tool calling</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="section-grid">
-            {/* Panel 01: Audit Setup */}
-            <div className="panel audit-setup">
-              <div className="panel-head">
-                <div>
-                  <span className="section-kicker">01 / CONFIGURATION</span>
-                  <h2>Run an audit</h2>
-                </div>
-                <span className="panel-icon"><ScanSearch size={20} /></span>
-              </div>
-
-              <label className="field-label" htmlFor="project">SELECT DEMO SCENARIO</label>
-              <div className="select-wrap">
-                <select id="project" value={active} onChange={e => changeProject(e.target.value)}>
-                  {projects.length ? projects.map(p => (
-                    <option value={p.id} key={p.id}>
-                      {projectDemoLabels[p.id] || p.name}
-                    </option>
-                  )) : <option>Loading projects...</option>}
-                </select>
-                <ChevronDown size={17} />
-              </div>
-
-              {selected && (
-                <div className="project-detail">
-                  <span className="project-avatar">{selected.client.split(' ').map(s => s[0]).slice(0, 2).join('')}</span>
-                  <div>
-                    <strong>{selected.client} — {selected.name}</strong>
-                    <small>{selected.owner} · Target: {selected.target_date}</small>
-                    {demoBadge && (
-                      <div style={{ marginTop: '5px' }}>
-                        <Flag type={demoBadge.type}>{demoBadge.badge}</Flag>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <label className="field-label mode-title">AUDIT EXECUTION MODE</label>
-              <div className="mode-choices">
-                <button
-                  className={'mode-choice ' + (mode === 'preview' ? 'selected' : '')}
-                  onClick={() => setMode('preview')}
-                >
-                  <Terminal size={17} />
-                  <strong>Evidence preview</strong>
-                  <small>Offline · Deterministic rules</small>
-                </button>
-                <button
-                  className={'mode-choice ' + (mode === 'agent' ? 'selected' : '')}
-                  onClick={() => setMode('agent')}
-                >
-                  <Sparkles size={17} />
-                  <strong>Google ADK agent</strong>
-                  <small>Real model + 4 tool calls</small>
-                </button>
-              </div>
-
-              <button
-                className="primary-cta"
-                onClick={() => runAudit()}
-                disabled={busy || !selected}
-              >
-                {busy ? (
-                  <RefreshCw size={18} className="spin" />
-                ) : (
-                  <ScanSearch size={18} />
-                )}
-                {busy ? (
-                  mode === 'agent' ? 'Executing Google ADK tools…' : 'Evaluating evidence policy…'
-                ) : (
-                  mode === 'agent' ? 'Run Google ADK agent audit' : 'Run evidence preview'
-                )}
-                <ArrowRight size={18} />
-              </button>
-
-              <div className="setup-note">
-                <Info size={15} />
-                {mode === 'preview'
-                  ? 'Evidence Preview executes offline deterministic rules without calling external AI models.'
-                  : health?.agent_configured
-                    ? 'Google API key active. Real Google ADK Agent will execute 4 read-only evidence tools.'
-                    : 'Google ADK requires GOOGLE_API_KEY configured in backend/.env.'}
-              </div>
-            </div>
-
-            {/* Panel 02: Readiness Verdict */}
-            <div className="panel report-panel">
-              <div className="panel-head">
-                <div>
-                  <span className="section-kicker">02 / AUDIT RESULT</span>
-                  <h2>Readiness verdict</h2>
-                </div>
-                <button
-                  className="icon-btn"
-                  disabled={!audit || busy}
-                  onClick={() => runAudit()}
-                  title="Re-run current audit"
-                >
-                  <RefreshCw size={17} />
-                </button>
-              </div>
-
-              {!audit ? (
-                <div className="empty-state">
-                  <div className="empty-icon"><Shield size={39} strokeWidth={1.4} /></div>
-                  <strong>No audit run yet</strong>
-                  <p>Select a sample scenario and click “Run audit” to inspect delivery readiness.</p>
-                </div>
-              ) : (
-                <div className="result-box">
-                  <div className={`mode-badge-indicator ${audit.mode}`}>
-                    {audit.mode === 'agent' ? (
-                      <><Sparkles size={12} /> Google ADK Agent Review</>
-                    ) : (
-                      <><Terminal size={12} /> Deterministic Evidence Preview</>
-                    )}
-                  </div>
-
-                  <div className={'verdict ' + audit.status.toLowerCase()}>
-                    <span className="verdict-icon">
-                      {audit.status === 'READY' ? <ShieldCheck size={24} /> :
-                       audit.status === 'BLOCKED' ? <ShieldAlert size={24} /> :
-                       <CircleAlert size={24} />}
-                    </span>
-                    <div>
-                      <small>POLICY-ENFORCED STATUS</small>
-                      <strong>{stateLabel[audit.status]}</strong>
-                    </div>
-                    <Flag type={audit.status === 'READY' ? 'success' : audit.status === 'BLOCKED' ? 'danger' : 'warning'}>
-                      {audit.status.replace('_', ' ')}
-                    </Flag>
-                  </div>
-
-                  {/* Blocker Callout if Blocked */}
-                  {audit.status === 'BLOCKED' && audit.blockers.length > 0 && (
-                    <div className="blocker-callout">
-                      <div className="blocker-callout-head">
-                        <ShieldAlert size={14} /> Explicit Handoff Blocker(s)
-                      </div>
-                      <ul className="blocker-list">
-                        {audit.blockers.map(b => (
-                          <li key={b.id}>
-                            <strong>{b.title}:</strong> {b.reason}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  <p className="verdict-description">{audit.summary}</p>
-
-                  <div className="progress-head">
-                    <span>Requirements verified</span>
-                    <strong>{verified} <span>/ {audit.total}</span></strong>
-                  </div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${fraction}%` }} />
-                  </div>
-
-                  <div className="metric-grid">
-                    <div>
-                      <CheckCircle2 size={17} className="ok" />
-                      <strong>{audit.counts.VERIFIED}</strong>
-                      <small>Verified</small>
-                    </div>
-                    <div>
-                      <XCircle size={17} className="bad" />
-                      <strong>{audit.counts.BLOCKED}</strong>
-                      <small>Blocked</small>
-                    </div>
-                    <div>
-                      <CircleDashed size={17} className="maybe" />
-                      <strong>{audit.counts.UNVERIFIED + audit.counts.CONFLICT}</strong>
-                      <small>Needs review</small>
-                    </div>
-                  </div>
-
-                  <div className="human-guard-notice">
-                    <LockKeyhole size={14} />
-                    <span>
-                      <strong>Human Sign-off Gate:</strong> Automated audits cannot self-authorize release. Formal human stakeholder sign-off is mandatory.
-                    </span>
-                  </div>
-
-                  <button className="export-btn" onClick={copySummary}>
-                    {copied ? <Check size={16} /> : <Copy size={16} />}
-                    {copied ? 'Copied to clipboard' : 'Copy evidence report'}
-                    <ArrowDownRight size={15} />
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-
+        {/* Viewport Canvas */}
+        <div className="workspace-viewport">
+          {/* Error Banner */}
           {error && (
-            <div className="error-banner">
-              <TriangleAlert size={19} />
-              <span>{error}</span>
-              <button onClick={() => setError('')}>Dismiss</button>
+            <div className="error-toast-banner">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={16} />
+                <span>{error}</span>
+              </div>
+              <button
+                onClick={() => setError('')}
+                style={{ background: 'transparent', border: 'none', color: '#fecdd3', cursor: 'pointer' }}
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
 
-          {/* Section 03: Requirement-level traceability */}
-          <section className="panel details-panel">
-            <div className="detail-heading">
-              <div>
-                <span className="section-kicker">03 / REQUIREMENT-LEVEL TRACEABILITY</span>
-                <h2>Evidence breakdown</h2>
-                <p>Every claim links directly to immutable source records. Missing or unverified data is never a pass.</p>
-              </div>
-              <div className="tab-group">
-                <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>All</button>
-                <button className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>Needs attention</button>
-                <button className={filter === 'passed' ? 'on' : ''} onClick={() => setFilter('passed')}>Verified</button>
-              </div>
-            </div>
-
-            {!audit ? (
-              <div className="detail-empty">
-                <FileCheck size={24} />
-                <span>Requirement evidence will appear here after an audit.</span>
-              </div>
-            ) : (
-              <div className="req-list">
-                {visible.length === 0 ? (
-                  <div className="detail-empty">No requirements match this filter.</div>
-                ) : visible.map((r, i) => (
-                  <div className="req-row" key={r.id}>
-                    <div className={'req-icon ' + r.status.toLowerCase()}>
-                      {r.status === 'VERIFIED' ? <Check size={18} /> :
-                       r.status === 'BLOCKED' ? <XCircle size={18} /> :
-                       r.status === 'CONFLICT' ? <GitBranch size={18} /> :
-                       <Clock3 size={18} />}
-                    </div>
-                    <div className="req-body">
-                      <div className="req-top">
-                        <strong>{r.title}</strong>
-                        <Flag type={r.status === 'VERIFIED' ? 'success' : r.status === 'BLOCKED' ? 'danger' : 'warning'}>
-                          {badgeLabel[r.status]}
-                        </Flag>
-                      </div>
-                      <p>{r.reason}</p>
-                      <div className="evidence-chips">
-                        <span className="evidence-category">{r.kind}</span>
-                        {r.evidence.length ? r.evidence.map((e, j) => (
-                          <span className="evidence-chip" key={j} title={e.detail}>
-                            <ClipboardCheck size={12} />
-                            {e.source} <span>· {e.status}</span>
-                          </span>
-                        )) : (
-                          <span className="no-evidence"><FileWarning size={12} /> No trusted evidence</span>
-                        )}
-                      </div>
-                    </div>
-                    <span className="req-number">{String(i + 1).padStart(2, '0')}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Bottom Grid: 04 Remediation & 05 Execution Trace */}
-          <section className="bottom-grid">
-            <div className="panel next-actions">
-              <div className="panel-head">
-                <div>
-                  <span className="section-kicker">04 / REMEDIATION</span>
-                  <h2>Next best actions</h2>
+          {/* Project Header Card */}
+          {selectedProject && (
+            <section className="project-header-panel">
+              <div className="project-info-column">
+                <div className="project-title-row">
+                  <h1 className="project-heading">{selectedProject.name}</h1>
+                  {projectScenarios[selectedProject.id] && (
+                    <span className={`project-nav-badge ${projectScenarios[selectedProject.id].type}`} style={{ fontSize: '11px', padding: '3px 8px' }}>
+                      {projectScenarios[selectedProject.id].tag}
+                    </span>
+                  )}
                 </div>
-                <span className="panel-icon"><ArrowRight size={19} /></span>
-              </div>
-              {!audit ? (
-                <p className="placeholder-line">Complete an audit to generate prioritized next steps.</p>
-              ) : (
-                <div className="actions-list">
-                  {audit.next_actions.map((action, i) => (
-                    <div className="action-row" key={i}>
-                      <span>{String(i + 1).padStart(2, '0')}</span>
-                      <p>{action}</p>
-                    </div>
-                  ))}
+                <p className="project-description">{selectedProject.description}</p>
+                <div className="project-metadata-strip">
+                  <div className="metadata-item">
+                    <span>Client:</span>
+                    <strong>{selectedProject.client}</strong>
+                  </div>
+                  <span>•</span>
+                  <div className="metadata-item">
+                    <span>Owner:</span>
+                    <strong>{selectedProject.owner}</strong>
+                  </div>
+                  <span>•</span>
+                  <div className="metadata-item">
+                    <Clock size={13} style={{ color: '#64748b' }} />
+                    <span>Target:</span>
+                    <strong>{selectedProject.target_date}</strong>
+                  </div>
                 </div>
-              )}
-            </div>
-
-            {/* Panel 05: Visual Tool Execution Timeline */}
-            <div className="panel tool-panel">
-              <div className="panel-head">
-                <div>
-                  <span className="section-kicker">05 / EXECUTION TIMELINE</span>
-                  <h2>Agent tool activity</h2>
-                </div>
-                <span className="panel-icon"><Activity size={19} /></span>
               </div>
 
-              {!audit ? (
-                <div className="trace-empty">Run in Google ADK mode to see actual tool invocations.</div>
-              ) : audit.mode === 'preview' ? (
-                /* Offline Preview Mode Banner */
-                <div className="preview-mode-card">
-                  <div className="preview-mode-head">
-                    <Terminal size={22} className="preview-mode-icon" />
-                    <div>
-                      <strong>Offline Evidence Preview Mode</strong>
-                      <small>Evaluated by deterministic rules · Zero AI calls</small>
-                    </div>
-                    <Flag type="muted">Deterministic</Flag>
-                  </div>
-                  <p className="preview-mode-desc">
-                    This preview evaluates your project against deterministic handoff policy rules without calling an AI model. To inspect live Google ADK tool execution and AI narration, switch to Agent Mode.
-                  </p>
-                  <div className="preview-mode-features">
-                    <div><Check size={14} className="text-lime-400" /> Mathematically certified policy decisions</div>
-                    <div><Check size={14} className="text-lime-400" /> Missing evidence treated strictly as unverified</div>
-                    <div><Check size={14} className="text-lime-400" /> Cached passes revoked during source outages</div>
-                  </div>
-                  <button className="preview-switch-btn" onClick={() => runAudit('agent')}>
-                    <Sparkles size={15} /> Switch to Google ADK Agent Mode & Run <ArrowRight size={15} />
+              <div className="project-actions-column">
+                <div className="mode-toggle-segmented">
+                  <button
+                    className={`segmented-option ${mode === 'agent' ? 'active agent' : ''}`}
+                    onClick={() => setMode('agent')}
+                    title="Real Google ADK Agent with 4 tool executions and Gemini model"
+                  >
+                    <Sparkles size={13} />
+                    <span>Google ADK Agent</span>
+                  </button>
+                  <button
+                    className={`segmented-option ${mode === 'preview' ? 'active' : ''}`}
+                    onClick={() => setMode('preview')}
+                    title="100% offline deterministic policy calculation"
+                  >
+                    <Terminal size={13} />
+                    <span>Evidence Preview</span>
                   </button>
                 </div>
-              ) : (
-                /* Real Google ADK Execution Timeline */
-                <div className="timeline-container">
-                  <div className="timeline-header">
-                    <div className="timeline-tag">
-                      <Cpu size={14} />
-                      <span>Google ADK Agent</span>
-                      <span className="timeline-model">{audit.agent_review?.model || 'gemini-2.5-flash'}</span>
-                    </div>
-                    <Flag type={audit.agent_review?.complete ? 'success' : 'warning'}>
-                      {audit.agent_review?.complete ? '4 / 4 Tools Executed' : `${audit.agent_review?.tool_call_count || 0}/4 Tools Executed`}
-                    </Flag>
-                  </div>
 
-                  {audit.agent_review?.execution_trace && audit.agent_review.execution_trace.length > 0 ? (
-                    <div className="timeline-steps">
-                      {audit.agent_review.execution_trace.map((evt) => (
-                        <div key={evt.order} className={`timeline-item ${evt.status}`}>
-                          <div className="timeline-marker">
-                            #{evt.order}
-                          </div>
-                          <div className="timeline-card">
-                            <div className="timeline-card-head">
-                              <div className="timeline-tool-title">
-                                <strong>{evt.title}</strong>
-                                <code>{evt.tool}()</code>
-                              </div>
-                              <Flag type={
-                                evt.status === 'verified' ? 'success' :
-                                evt.status === 'blocked' ? 'danger' :
-                                evt.status === 'error' ? 'danger' :
-                                evt.status === 'warning' ? 'warning' : 'muted'
-                              }>
-                                {evt.status === 'verified' ? 'Verified' :
-                                 evt.status === 'blocked' ? 'Blocked' :
-                                 evt.status === 'error' ? 'Source Outage' :
-                                 evt.status === 'warning' ? 'Pending Review' : 'No Records'}
-                              </Flag>
-                            </div>
-                            <p className="timeline-detail">{evt.detail}</p>
-                            {evt.source_ids && evt.source_ids.length > 0 && (
-                              <div className="timeline-sources">
-                                <span className="timeline-sources-label">Sources:</span>
-                                {evt.source_ids.map((sid) => (
-                                  <span key={sid} className="timeline-source-pill">
-                                    <ClipboardCheck size={10} /> {sid}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                <button
+                  className="run-audit-button"
+                  onClick={() => runAudit()}
+                  disabled={busy}
+                  title="Run Audit (Shortcut: ⌘+Enter)"
+                >
+                  {busy ? (
+                    <RefreshCw size={15} style={{ animation: 'spin 0.8s linear infinite' }} />
                   ) : (
-                    /* Fallback trace if execution_trace was not present */
-                    <div className="trace-list">
-                      {Object.entries(toolNames).map(([key, label]) => (
-                        <div key={key} className="trace-row">
-                          <span className={'trace-icon ' + (audit.agent_review?.tool_calls.includes(key) ? 'called' : 'uncalled')}>
-                            {audit.agent_review?.tool_calls.includes(key) ? <Check size={14} /> : <CircleDashed size={14} />}
-                          </span>
-                          <span>{label}</span>
-                          <small>{audit.agent_review?.tool_calls.includes(key) ? 'Called' : 'Not called'}</small>
-                        </div>
-                      ))}
-                    </div>
+                    <ScanSearch size={15} />
                   )}
+                  <span>
+                    {busy
+                      ? mode === 'agent'
+                        ? 'Executing ADK Tools…'
+                        : 'Checking Policy…'
+                      : mode === 'agent'
+                        ? 'Run ADK Audit'
+                        : 'Preview Policy'}
+                  </span>
+                </button>
+              </div>
+            </section>
+          )}
 
-                  {/* Agent Verified Commentary */}
-                  <div className="agent-commentary-box">
-                    <div className="agent-commentary-head">
-                      <Sparkles size={14} />
-                      <strong>Agent Verified Commentary</strong>
-                      <span className="guard-pill">Policy-Enforced</span>
-                    </div>
-                    <p className="agent-commentary-text">
-                      {audit.agent_review?.summary || audit.agent_review?.warning || 'No verified agent explanation available.'}
-                    </p>
-                    {audit.agent_review?.warning && (
-                      <div className="agent-warning-banner">
-                        <TriangleAlert size={14} />
-                        <span>{audit.agent_review.warning}</span>
-                      </div>
+          {/* Executive Verdict Banner (Shows when audit has executed) */}
+          {audit ? (
+            <section className={`executive-verdict-card ${audit.status.toLowerCase()}`}>
+              <div className="verdict-header-row">
+                <div className="verdict-main-meta">
+                  <div className="verdict-icon-container">
+                    {audit.status === 'READY' ? (
+                      <ShieldCheck size={26} strokeWidth={2.2} />
+                    ) : audit.status === 'BLOCKED' ? (
+                      <ShieldAlert size={26} strokeWidth={2.2} />
+                    ) : (
+                      <AlertCircle size={26} strokeWidth={2.2} />
                     )}
+                  </div>
+                  <div className="verdict-text-block">
+                    <div className="verdict-badge-line">
+                      <h2 className="verdict-status-title">
+                        {statusConfig[audit.status].label}
+                      </h2>
+                      <span className={`project-nav-badge ${audit.status === 'READY' ? 'success' : audit.status === 'BLOCKED' ? 'danger' : 'warning'}`}>
+                        Policy Enforced
+                      </span>
+                      {audit.mode === 'agent' && (
+                        <span className="project-nav-badge" style={{ background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+                          Google ADK
+                        </span>
+                      )}
+                    </div>
+                    <p className="verdict-summary-prose">{audit.summary}</p>
+                  </div>
+                </div>
+
+                <div className="verdict-actions-row">
+                  <button className="btn-secondary" onClick={() => runAudit()} disabled={busy} title="Rerun current audit">
+                    <RotateCcw size={13} />
+                    <span>Re-audit</span>
+                  </button>
+                  <button className="btn-secondary" onClick={handleCopyReport}>
+                    {copied ? <Check size={13} style={{ color: '#34d399' }} /> : <Copy size={13} />}
+                    <span>{copied ? 'Copied' : 'Export Report'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Blocker Callout when Blocked */}
+              {audit.status === 'BLOCKED' && audit.blockers.length > 0 && (
+                <div className="blocker-alert-banner">
+                  <ShieldAlert size={16} className="blocker-alert-icon" />
+                  <div className="blocker-alert-content">
+                    <span className="blocker-alert-title">Contractual Delivery Blocker Detected:</span>
+                    <ul className="blocker-alert-items">
+                      {audit.blockers.map(b => (
+                        <li key={b.id}>
+                          <strong>{b.title}:</strong> {b.reason}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
               )}
+
+              {/* Metrics & Progress Strip */}
+              <div className="verdict-metrics-strip">
+                <div className="metric-progress-col">
+                  <div className="progress-label-row">
+                    <span>Requirements Verified</span>
+                    <strong>{verifiedCount} / {audit.total} ({progressPct}%)</strong>
+                  </div>
+                  <div className="custom-progress-track">
+                    <div className="custom-progress-fill" style={{ width: `${progressPct}%` }} />
+                  </div>
+                </div>
+                <div className="metric-stat-box verified">
+                  <span>Verified Pass</span>
+                  <strong>{audit.counts.VERIFIED}</strong>
+                </div>
+                <div className="metric-stat-box blocked">
+                  <span>Blocked</span>
+                  <strong>{audit.counts.BLOCKED}</strong>
+                </div>
+                <div className="metric-stat-box review">
+                  <span>Needs Review</span>
+                  <strong>{audit.counts.UNVERIFIED + audit.counts.CONFLICT}</strong>
+                </div>
+              </div>
+            </section>
+          ) : (
+            <div className="executive-verdict-card" style={{ padding: '0' }}>
+              <div className="empty-audit-placeholder">
+                <div className="placeholder-icon-ring">
+                  <ScanSearch size={24} />
+                </div>
+                <strong>No Active Audit Certification</strong>
+                <p>Click &ldquo;Run ADK Audit&rdquo; above (or press ⌘+Enter) to evaluate this project against contractual proof.</p>
+              </div>
+            </div>
+          )}
+
+          {/* 3. DUAL-COLUMN DEEP INSPECTION */}
+          <section className="inspection-grid">
+            {/* Column A: Contractual Evidence Inspector */}
+            <div className="inspection-panel">
+              <div className="panel-header-strip">
+                <div className="panel-header-left">
+                  <div className="panel-icon-badge">
+                    <FileCheck size={16} />
+                  </div>
+                  <div>
+                    <h3 className="panel-title">Contractual Proof Chain</h3>
+                    <div className="panel-subtitle">Every requirement traced to immutable source records</div>
+                  </div>
+                </div>
+
+                <div className="filter-tabs">
+                  <button
+                    className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
+                    onClick={() => setFilter('all')}
+                  >
+                    All ({audit?.requirements.length || 0})
+                  </button>
+                  <button
+                    className={`filter-tab ${filter === 'open' ? 'active' : ''}`}
+                    onClick={() => setFilter('open')}
+                  >
+                    Blockers ({audit?.blockers.length || 0})
+                  </button>
+                  <button
+                    className={`filter-tab ${filter === 'passed' ? 'active' : ''}`}
+                    onClick={() => setFilter('passed')}
+                  >
+                    Verified ({verifiedCount})
+                  </button>
+                </div>
+              </div>
+
+              <div className="requirements-container">
+                {audit ? (
+                  filteredRequirements.length > 0 ? (
+                    filteredRequirements.map(req => {
+                      const isExpanded = expandedReqs[req.id] ?? false
+                      const itemCfg = itemStatusConfig[req.status]
+                      const StatusIcon = itemCfg.icon
+
+                      return (
+                        <div key={req.id} className="requirement-card">
+                          <div className="requirement-header">
+                            <div className="requirement-title-group">
+                              <span className={`status-indicator-icon ${itemCfg.class}`}>
+                                <StatusIcon size={12} strokeWidth={2.5} />
+                              </span>
+                              <span className="requirement-title">{req.title}</span>
+                            </div>
+
+                            <div className="requirement-tags">
+                              <span className="kind-tag">{req.kind}</span>
+                              <span className={`status-pill ${itemCfg.class}`}>
+                                {itemCfg.label}
+                              </span>
+                              {req.evidence.length > 0 && (
+                                <button
+                                  onClick={() => toggleRequirementExpand(req.id)}
+                                  className="btn-secondary"
+                                  style={{ height: '24px', padding: '0 6px', fontSize: '10px' }}
+                                  title="Inspect Evidence Records"
+                                >
+                                  {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <p className="requirement-reason">{req.reason}</p>
+
+                          {/* Expandable Evidence Tray */}
+                          {req.evidence.length > 0 && isExpanded && (
+                            <div className="evidence-items-tray">
+                              {req.evidence.map((ev, idx) => (
+                                <div key={idx} className="evidence-record-chip">
+                                  <div className="evidence-source-key">
+                                    <Code2 size={11} />
+                                    <span>{ev.source}</span>
+                                    <span style={{ color: '#64748b', fontSize: '9px' }}>[{ev.status}]</span>
+                                  </div>
+                                  <span className="evidence-detail-text" title={ev.detail}>
+                                    {ev.detail || 'Record registered in verified index.'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b', fontSize: '12px' }}>
+                      No criteria match the selected filter.
+                    </div>
+                  )
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '36px', color: '#64748b', fontSize: '12px' }}>
+                    Run an audit to view contractual evidence breakdown.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Column B: Real Google ADK Agent Execution Timeline */}
+            <div className="inspection-panel">
+              <div className="panel-header-strip">
+                <div className="panel-header-left">
+                  <div className="panel-icon-badge" style={{ color: '#818cf8' }}>
+                    <Activity size={16} />
+                  </div>
+                  <div>
+                    <h3 className="panel-title">Google ADK Agent Execution</h3>
+                    <div className="panel-subtitle">4 read-only tools executed sequentially via Gemini</div>
+                  </div>
+                </div>
+
+                {audit?.mode === 'agent' && (
+                  <span className="tool-count-badge">
+                    {audit.agent_review?.complete ? '4 / 4 Tools Executed' : `${audit.agent_review?.tool_call_count || 0}/4 Tools`}
+                  </span>
+                )}
+              </div>
+
+              <div className="timeline-panel-body">
+                {!audit ? (
+                  <div style={{ textAlign: 'center', padding: '36px', color: '#64748b', fontSize: '12px' }}>
+                    Tool execution timeline will stream here after audit execution.
+                  </div>
+                ) : audit.mode === 'preview' ? (
+                  /* Offline Preview Mode Banner */
+                  <div className="preview-callout-panel">
+                    <div className="preview-callout-top">
+                      <div className="preview-callout-icon">
+                        <Terminal size={18} />
+                      </div>
+                      <div className="preview-callout-titles">
+                        <strong>Deterministic Evidence Preview</strong>
+                        <span>Evaluated locally via immutable policy rules • Zero LLM calls</span>
+                      </div>
+                    </div>
+                    <p className="preview-callout-desc">
+                      This audit was computed instantaneously using client-side deterministic policy tables. To watch the Google ADK Agent run all four evidence tools and inspect live AI reasoning, switch to Agent Mode.
+                    </p>
+                    <button
+                      className="preview-switch-action"
+                      onClick={() => runAudit('agent')}
+                      disabled={busy}
+                    >
+                      <Sparkles size={14} />
+                      <span>Run with Real Google ADK Agent →</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* Real Google ADK Tool Calling Sequence */
+                  <>
+                    <div className="agent-meta-header">
+                      <div className="model-citation-badge">
+                        <Cpu size={14} />
+                        <span>Model: {audit.agent_review?.model || 'gemini-3.5-flash-lite'}</span>
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>
+                        Session: InMemorySessionService
+                      </span>
+                    </div>
+
+                    <div className="timeline-step-list">
+                      {audit.agent_review?.execution_trace && audit.agent_review.execution_trace.length > 0 ? (
+                        audit.agent_review.execution_trace.map(step => (
+                          <div key={step.order} className={`timeline-card-item ${step.status}`}>
+                            <div className="step-marker-badge">
+                              {step.order}
+                            </div>
+                            <div className="step-content-card">
+                              <div className="step-header-row">
+                                <div className="step-tool-signature">
+                                  <strong>{step.title}</strong>
+                                  <span>{step.tool}()</span>
+                                </div>
+                                <span className={`project-nav-badge ${
+                                  step.status === 'verified' ? 'success' :
+                                  step.status === 'blocked' ? 'danger' :
+                                  step.status === 'error' ? 'danger' :
+                                  step.status === 'warning' ? 'warning' : 'muted'
+                                }`}>
+                                  {step.status === 'verified' ? 'Verified' :
+                                   step.status === 'blocked' ? 'Blocked' :
+                                   step.status === 'error' ? 'Source Outage' :
+                                   step.status === 'warning' ? 'Pending' : 'Empty'}
+                                </span>
+                              </div>
+
+                              <p className="step-detail-message">{step.detail}</p>
+
+                              {step.source_ids && step.source_ids.length > 0 && (
+                                <div className="step-sources-strip">
+                                  {step.source_ids.map(sid => (
+                                    <span key={sid} className="source-ref-pill">
+                                      <Code2 size={10} /> {sid}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: '11px', color: '#64748b', padding: '12px' }}>
+                          No execution trace logged for this agent run.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Agent Verified Commentary Box */}
+                    <div className="agent-synthesis-box">
+                      <div className="synthesis-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Sparkles size={14} />
+                          <span>Agent Synthesis (Citing Sources)</span>
+                        </div>
+                        <span className="synthesis-badge">Ground Truth Checked</span>
+                      </div>
+                      <p className="synthesis-text">
+                        {audit.agent_review?.summary || audit.agent_review?.warning || 'No narrative generated.'}
+                      </p>
+                    </div>
+
+                    {/* Remediation & Next Actions */}
+                    <div className="next-actions-container">
+                      <span className="actions-header-title">Prioritized Next Actions</span>
+                      {audit.next_actions.map((act, i) => (
+                        <div key={i} className="action-item-row">
+                          <span className="action-number-dot">{i + 1}</span>
+                          <span>{act}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </section>
 
-          <footer>
-            <div>
-              <ShieldCheck size={15} />
-              HANDOFFPROOF <span>·</span> Hackathon prototype
+          {/* 4. MANDATORY HUMAN GOVERNANCE BAR */}
+          <footer className="human-signoff-bar">
+            <div className="human-signoff-left">
+              <Lock size={15} style={{ color: '#34d399' }} />
+              <div>
+                <strong>Mandatory Human Gate:</strong> Automated agents audit delivery criteria, but final milestone and financial release requires formal human stakeholder authorization.
+              </div>
             </div>
-            <span>Sample data only · Read-only tools · Human approval required</span>
+            <div className="human-signoff-badge">
+              Deterministic Safety Authority
+            </div>
           </footer>
         </div>
-      </main>
+      </div>
     </div>
   )
 }
-
-export default App
