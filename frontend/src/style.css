@@ -1170,14 +1170,146 @@ button, input, select {
 .source-ref-pill {
   font-family: var(--font-mono);
   font-size: 10px;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 4px;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
   color: #38bdf8;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.source-ref-pill:hover {
+  background: var(--bg-card-elevated);
+  border-color: #38bdf8;
+  color: #7dd3fc;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
+}
+
+.source-ref-pill:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 1px;
+}
+
+.source-ref-pill.active {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: #38bdf8;
+  color: #bae6fd;
+}
+
+/* Active Running Audit Card */
+.active-running-card {
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.running-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.running-tools-planned {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.planned-tool-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 6px 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.running-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+
+/* Evidence Detail Inspector Card */
+.evidence-inspector-card {
+  background: var(--bg-card-elevated);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.inspector-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 8px;
+}
+
+.inspector-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inspector-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.inspector-field-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.inspector-detail-quote {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: #e2e8f0;
+  background: var(--bg-card);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.evidence-record-chip.highlighted {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
 }
 
 /* Agent Commentary Callout */
